@@ -1,322 +1,229 @@
-// 第 3 步：按关键词用 wxrank artlist 建池，聚合成候选对标账号（低粉爆款优先）。
-//
-//   node scripts/find-accounts.mjs --track "读书" --keywords "书单,认知,搞钱" --yes
-//   node scripts/find-accounts.mjs --track "读书" --keywords "书单,认知" --dry-run
-//
-// 先不带 --yes 跑一次，只会打印计划和预估花费，不调用接口、不花钱。
+// 先发现高阅读文章，再按账号查询无阅读下限的普通文章建立基线。
 import { join } from 'node:path';
 import {
-  Budget,
-  BudgetStop,
-  bizOf,
-  buildMustRegex,
-  call,
-  clean,
-  ensureDir,
-  fmt,
-  lastMonths,
-  list,
-  loadKey,
-  num,
-  parseArgs,
-  priceOf,
-  readJson,
-  samplePool,
-  saveBudget,
-  sleepMs,
-  snOf,
-  today,
-  trackSlug,
-  truthy,
-  writeCsv,
-  writeJson,
-  writeText,
+  Budget, BudgetStop, bizOf, buildMustRegex, call, clean, ensureDir, fmt, lastMonths,
+  list, loadKey, parseArgs, priceOf, readJson, samplePool, saveBudget, sleepMs, snOf,
+  today, trackSlug, truthy, writeCsv, writeJson, writeText,
 } from './lib.mjs';
+import { articleKey, articleSignal, baselineWindow, readingStats, readValue } from './reading-stats.mjs';
 
 const args = parseArgs(process.argv.slice(2));
 const cfg = readJson(args.config, {});
-const opt = (name, def) => (args[name] !== undefined ? args[name] : cfg[name] !== undefined ? cfg[name] : def);
-
+const opt = (name, def) => args[name] !== undefined ? args[name] : cfg[name] !== undefined ? cfg[name] : def;
+const numberOpt = (name, def, min = 0) => {
+  const n = Number(opt(name, def));
+  if (!Number.isFinite(n) || n < min) throw new Error('无效参数 --' + name);
+  return n;
+};
 const track = String(opt('track', '')).trim();
 const keywords = list(opt('keywords', ''));
-const monthsN = num(opt('months', 6), 6);
-const pagesN = num(opt('pages', 3), 3);
-const minRead = num(opt('min-read', 1000), 1000);
-const maxYuan = num(opt('max-yuan', 10), 10);
-const nameTop = num(opt('name-top', 30), 30);
-const gapMs = num(opt('gap-ms', 1500), 1500);
-const maxRatioFlag = num(opt('signal-ratio', 3), 3);
-const signalReadFloor = num(opt('signal-read', 10000), 10000);
+if (!track || !keywords.length) throw new Error('需要 --track 和已确认的 --keywords');
+const monthsN = Math.floor(numberOpt('months', 6, 1));
+const pagesN = Math.floor(numberOpt('pages', 3, 1));
+const minRead = numberOpt('min-read', 10000);
+const maxRead = numberOpt('max-read', 0);
+const maxYuan = numberOpt('max-yuan', 15);
+const nameTop = Math.floor(numberOpt('name-top', 30));
+const verifyTop = Math.floor(numberOpt('verify-top', 80));
+const baselineDays = Math.floor(numberOpt('baseline-days', 30, 1));
+const baselinePages = Math.floor(numberOpt('baseline-pages', 3, 1));
+const medianMax = numberOpt('baseline-median-max', 1000);
+const minSamples = Math.floor(numberOpt('baseline-min-samples', 10, 1));
+const signalRatio = numberOpt('signal-ratio', 10);
+const signalRead = numberOpt('signal-read', 10000);
+const targetAccounts = Math.floor(numberOpt('target-accounts', 0));
+const gapMs = numberOpt('gap-ms', 1500);
 const dry = truthy(opt('dry-run', false));
+const resume = truthy(opt('resume', false));
 const confirmed = truthy(opt('yes', false)) || dry;
-
-if (!track) {
-  console.error('缺少 --track（赛道大类词）。先问用户：你想做的赛道大类词是什么？');
-  process.exit(2);
-}
-if (!keywords.length) {
-  console.error('缺少 --keywords。先按 references/keyword-playbook.md 给用户 5-10 个关键词并等他确认。');
-  process.exit(2);
-}
-
+const mustWords = list(opt('must', ''));
+const must = buildMustRegex(mustWords);
+const preferred = buildMustRegex(list(opt('prefer-words', '')));
+const excluded = new Set(list(opt('exclude-account', '')));
 const outDir = ensureDir(String(opt('out', join(process.cwd(), 'gzh-bench', trackSlug(track)))));
 const months = lastMonths(monthsN);
-const plan = keywords.length * monthsN * pagesN;
-const planYuan = plan * priceOf('artlist') + nameTop * priceOf('artinfo');
-
-console.log('赛道：' + track);
-console.log('关键词（' + keywords.length + '）：' + keywords.join(' / '));
-console.log('时间窗：近 ' + monthsN + ' 个月（' + months[months.length - 1] + ' ~ ' + months[0] + '），单篇阅读下限 ' + minRead);
-console.log('输出目录：' + outDir);
-console.log('计划：artlist 最多 ' + plan + ' 次 + artinfo 最多 ' + nameTop + ' 次，预估 ¥' + planYuan.toFixed(2) + '（预算上限 ¥' + maxYuan.toFixed(2) + '）');
-
-if (!confirmed) {
-  console.log('\n未确认，未调用任何接口、未花费。');
-  console.log('把上面的「接口 × 次数 × 预估金额」报给用户，拿到授权后再加 --yes 重跑。');
-  process.exit(0);
-}
-
-const key = dry ? 'dry-run' : loadKey(opt('key'));
+const searchPlan = keywords.length * monthsN * pagesN;
+// 30 天窗口至多跨三个自然月（如 2 月很短），按更保守上限展示。
+const baselineMonths = Math.ceil(baselineDays / 28) + 1;
+const estimate = searchPlan * priceOf('artlist') + verifyTop * baselineMonths * baselinePages * priceOf('artlist') + (verifyTop + nameTop) * priceOf('artinfo');
+console.log('赛道：' + track + '\n关键词：' + keywords.join(' / '));
+console.log('发现：阅读 ≥' + minRead + (maxRead ? ' 且 ≤' + maxRead : '') + '；核查：按号查询，阅读下限为 0，无关键词');
+console.log('基线：爆款发布日期及之前 ' + baselineDays + ' 天；有效样本 ≥' + minSamples + '，中位数 <' + medianMax + '，单篇 ≥' + signalRead + ' 且倍率 ≥' + signalRatio);
+console.log('调用计划上限：搜索 artlist ' + searchPlan + ' 次；基线 artlist ' + (verifyTop * baselineMonths * baselinePages) + ' 次；artinfo ' + (verifyTop + nameTop) + ' 次；理论估算 ¥' + estimate.toFixed(2) + '，硬上限 ¥' + maxYuan.toFixed(2));
+if (!confirmed) { console.log('未确认，未调用付费接口。'); process.exit(0); }
+const key = dry ? '' : loadKey();
 const budget = new Budget(maxYuan, 'find-accounts');
-const failures = [];
-
-// ---- 建池 ----
+const previousBudget = resume ? readJson(join(outDir, 'budget.json'), null) : null;
+if (previousBudget) {
+  budget.spent = previousBudget.spent;
+  budget.calls = previousBudget.calls || {};
+  budget.ledger = previousBudget.ledger || [];
+} else {
+  budget.spent = numberOpt('spent-before', 0);
+  if (budget.spent) budget.ledger.push({api:'prior-task',yuan:budget.spent,note:'本轮之前已支出，计入累计上限'});
+}
+if (budget.spent > maxYuan) throw new Error('既有支出已经超过本轮预算');
+const failures = resume ? readJson(join(outDir, 'failures.json'), []) : [];
+const searchCache = resume ? readJson(join(outDir, 'search-cache.json'), {}) : {};
+const accountCache = readJson(join(outDir, 'account-cache.json'), {});
+const names = readJson(join(outDir, 'biz2name.json'), {});
 const poolMap = new Map();
-if (dry) {
-  for (const row of samplePool()) poolMap.set(row.sn, row);
-  console.log('\n[dry-run] 使用内置样例池 ' + poolMap.size + ' 篇，不联网。');
-} else {
-  outer: for (const kw of keywords) {
-    for (const month of months) {
-      for (let page = 1; page <= pagesN; page++) {
-        if (!budget.allow('artlist')) {
-          console.log('预算到顶，停止关键词轮。');
-          break outer;
-        }
-        let j;
-        try {
-          j = await call(
-            'artlist',
-            { month, keyword: kw, min_read_num: minRead, page },
-            { key, budget, gapMs, note: kw + ':' + month + ':p' + page }
-          );
-        } catch (e) {
-          if (e instanceof BudgetStop) {
-            console.log(e.message);
-            break outer;
-          }
-          throw e;
-        }
-        if (!j || j.code !== 0) {
-          failures.push({ api: 'artlist', keyword: kw, month, page, code: j && j.code, msg: clean(j && j.msg) });
-          break;
-        }
-        const rows = (j.data && j.data.list) || [];
-        for (const it of rows) {
-          const sn = snOf(it);
-          if (!sn || poolMap.has(sn)) continue;
-          poolMap.set(sn, {
-            sn,
-            title: clean(it.title),
-            desc: clean(it.digest || it.desc || '').slice(0, 140),
-            pub_time: it.pub_time || '',
-            read_num: num(it.read_num, 0),
-            like_num: num(it.like_num, 0),
-            look_num: num(it.look_num, 0),
-            share_num: num(it.share_num, 0),
-            wx_biz: bizOf(it),
-            wx_name: '',
-            wx_type: it.wx_type || '',
-            ip_region: it.ip_region || '',
-            art_url: it.art_url || '',
-            keyword: kw,
-            month,
-            src: 'artlist:' + kw + ':' + month,
-          });
-        }
-        if (!(j.data && j.data.cursor)) break;
-        await sleepMs(gapMs);
-      }
-      await sleepMs(gapMs);
-    }
-    console.log('关键词完成：' + kw + '｜池子累计 ' + poolMap.size + ' 篇');
-  }
+for (const row of (resume ? readJson(join(outDir, 'pool.json'), []) : [])) {
+  const id = articleKey(row); if (id) poolMap.set(id, row);
 }
-
-const pool = [...poolMap.values()];
-if (!pool.length) {
-  console.error('\n池子为空，没有可分析的候选账号。检查关键词、月份或 min-read。');
-  saveBudget(outDir, budget, { stage: 'find-accounts', failures, pool: 0 });
-  process.exit(1);
-}
-
-// ---- 按公众号聚合 ----
-const byBiz = new Map();
-for (const r of pool) {
-  const b = r.wx_biz || r.art_url || ('unknown:' + r.sn);
-  if (!byBiz.has(b)) byBiz.set(b, []);
-  byBiz.get(b).push(r);
-}
-
 const accounts = [];
-for (const [biz, arts] of byBiz) {
-  const sorted = arts.slice().sort((a, b) => a.read_num - b.read_num);
-  const reads = sorted.map((a) => a.read_num);
-  const median = reads[Math.floor((reads.length - 1) / 2)] || 0;
-  const max = reads[reads.length - 1] || 0;
-  const ratio = median > 0 ? Number((max / median).toFixed(2)) : null;
-  const top = sorted[sorted.length - 1];
-  accounts.push({
-    wx_biz: biz,
-    wx_name: '',
-    article_count: arts.length,
-    read_median: median,
-    read_max: max,
-    ratio,
-    last_pub: arts.map((a) => a.pub_time).filter(Boolean).sort().pop() || '',
-    low_fan_signal: (ratio !== null && ratio >= maxRatioFlag && max >= signalReadFloor) || max >= 100000,
-    sample_title: top.title,
-    top_art_url: top.art_url,
-    top_keyword: top.keyword,
-  });
+const normalize = (it, keyword = '', src = '') => ({
+  sn: snOf(it), title: clean(it.title), desc: clean(it.digest || it.desc || ''),
+  pub_time: String(it.pub_time || ''), read_num: readValue(it.read_num),
+  like_num: readValue(it.like_num), look_num: readValue(it.look_num), share_num: readValue(it.share_num),
+  wx_biz: bizOf(it), wx_name: clean(it.wx_name || ''), art_url: clean(it.art_url || ''), keyword, src,
+});
+function checkpoint() {
+  writeJson(join(outDir, 'pool.json'), [...poolMap.values()]);
+  writeJson(join(outDir, 'accounts.json'), accounts);
+  writeJson(join(outDir, 'search-cache.json'), searchCache);
+  writeJson(join(outDir, 'account-cache.json'), accountCache);
+  writeJson(join(outDir, 'biz2name.json'), names);
+  writeJson(join(outDir, 'failures.json'), failures);
+  writeJson(join(outDir, 'budget.json'), {cap:budget.cap,spent:budget.spent,calls:budget.calls,ledger:budget.ledger});
 }
-
-accounts.sort((a, b) => (b.ratio || 0) - (a.ratio || 0) || b.read_max - a.read_max);
-
-// ---- 给前 N 个账号补名字（artinfo，按 biz 去重 + 本地缓存）----
-const bizCachePath = join(outDir, 'biz2name.json');
-const biz2name = readJson(bizCachePath, {});
-const nameTargets = accounts.filter((a) => !biz2name[a.wx_biz]).slice(0, nameTop);
-let named = 0;
-
-if (dry) {
-  for (const a of accounts) {
-    const hit = pool.find((r) => (r.wx_biz || r.art_url) === a.wx_biz && r.wx_name);
-    if (hit) biz2name[a.wx_biz] = { name: hit.wx_name, user_name: '', signature: '' };
-  }
-  console.log('[dry-run] 跳过 artinfo，直接用样例账号名。');
-} else {
-  console.log('\n补账号名：待补 ' + nameTargets.length + ' 个（缓存已有 ' + Object.keys(biz2name).length + ' 个）');
-  for (const a of nameTargets) {
-    if (!budget.allow('artinfo')) {
-      console.log('artinfo 预算到顶，停止补名。');
-      break;
-    }
-    const sample = pool.find((r) => (r.wx_biz || r.art_url) === a.wx_biz && r.art_url);
-    if (!sample) continue;
-    let j;
-    try {
-      j = await call('artinfo', { url: sample.art_url }, { key, budget, gapMs, note: 'name:' + a.wx_biz });
-    } catch (e) {
-      if (e instanceof BudgetStop) {
-        console.log(e.message);
-        break;
+async function request(api, body, note) {
+  const j = await call(api, body, {key,budget,tries:1,note});
+  if (j?.code !== 0) failures.push({api, note, code:j?.code});
+  checkpoint();
+  await sleepMs(gapMs);
+  return j;
+}
+let stopped = false;
+try {
+  if (dry) {
+    for (const row of samplePool()) poolMap.set(articleKey(row), row);
+  } else {
+    for (const keyword of keywords) {
+      for (const month of months) {
+        const cacheKey = keyword + ':' + month;
+        if (searchCache[cacheKey]?.done) continue;
+        let cursor = '';
+        for (let page = 1; page <= pagesN; page++) {
+          const j = await request('artlist', {month,keyword,min_read_num:minRead,...(maxRead?{max_read_num:maxRead}:{}),...(cursor?{cursor}:{})}, 'search:' + cacheKey + ':p' + page);
+          if (j?.code !== 0) break;
+          const rows = j.data?.list || [];
+          for (const it of rows) {
+            const row = normalize(it, keyword, 'keyword:' + month);
+            const id = articleKey(row); if (id) poolMap.set(id, row);
+          }
+          cursor = j.data?.cursor || '';
+          searchCache[cacheKey] = {done:page === pagesN || !cursor || !rows.length,pages:page,truncated:page === pagesN && !!cursor && rows.length > 0};
+          checkpoint();
+          if (!cursor || !rows.length) break;
+        }
       }
-      throw e;
+      console.log('关键词完成：' + keyword + '｜去重池 ' + poolMap.size);
     }
-    if (j && j.code === 0 && j.data && j.data.name) {
-      biz2name[a.wx_biz] = {
-        name: clean(j.data.name),
-        user_name: j.data.user_name || '',
-        signature: clean(j.data.signature).slice(0, 80),
-      };
-      named++;
-    } else {
-      failures.push({ api: 'artinfo', biz: a.wx_biz, code: j && j.code, msg: clean(j && j.msg) });
-    }
-    if (named % 25 === 0 && named > 0) writeJson(bizCachePath, biz2name);
-    await sleepMs(gapMs);
   }
+} catch (e) { if (!(e instanceof BudgetStop)) throw e; stopped = true; console.log(e.message); }
+const byBiz = new Map();
+for (const row of poolMap.values()) {
+  if (!row.wx_biz || readValue(row.read_num) < signalRead || row.read_num === null) continue;
+  if (must && !must.test(row.title + ' ' + row.desc)) continue;
+  if (excluded.has(row.wx_biz) || excluded.has(row.wx_name)) continue;
+  if (!byBiz.has(row.wx_biz)) byBiz.set(row.wx_biz, []);
+  byBiz.get(row.wx_biz).push(row);
 }
-
-writeJson(bizCachePath, biz2name);
-for (const a of accounts) {
-  const hit = biz2name[a.wx_biz];
-  a.wx_name = (hit && hit.name) || '';
-  a.signature = (hit && hit.signature) || '';
-}
-
-// ---- 落盘 ----
-writeJson(join(outDir, 'pool.json'), pool);
-writeJson(join(outDir, 'accounts.json'), accounts);
-writeJson(join(outDir, 'config.json'), {
-  track,
-  keywords,
-  months: monthsN,
-  pages: pagesN,
-  'min-read': minRead,
-  'max-yuan': maxYuan,
-  'name-top': nameTop,
-  out: outDir,
-});
-writeCsv(
-  join(outDir, 'accounts.csv'),
-  ['对标账号名', 'wx_biz', '池内篇数', '阅读中位', '最高阅读', '爆款倍率', '最近更新', '低粉爆款信号', '代表作标题', '代表作链接', '关键词', '粉丝数', '备注'],
-  accounts.map((a) => ({
-    对标账号名: a.wx_name,
-    wx_biz: a.wx_biz,
-    池内篇数: a.article_count,
-    阅读中位: a.read_median,
-    最高阅读: a.read_max,
-    爆款倍率: a.ratio === null ? '' : a.ratio,
-    最近更新: String(a.last_pub).slice(0, 10),
-    低粉爆款信号: a.low_fan_signal ? '是' : '',
-    代表作标题: a.sample_title,
-    代表作链接: a.top_art_url,
-    关键词: a.top_keyword,
-    粉丝数: '不可见',
-    备注: a.wx_name ? '' : '账号名未补到，需人工核实',
-  }))
-);
-
-const flagged = accounts.filter((a) => a.low_fan_signal);
-const report = [
-  '# 对标账号候选 · ' + track,
-  '',
-  '- 生成日期：' + today(),
-  '- 关键词（' + keywords.length + '）：' + keywords.join(' / '),
-  '- 时间窗：近 ' + monthsN + ' 个月｜单篇阅读下限：' + minRead,
-  '- 池内文章：' + pool.length + ' 篇｜候选账号：' + accounts.length + ' 个｜低粉爆款信号：' + flagged.length + ' 个',
-  '- 粉丝数：不可见（wxrank 不提供）',
-  '',
-  '## 候选账号（按爆款倍率排序）',
-  '',
-  '| # | 账号 | 池内篇数 | 阅读中位 | 最高阅读 | 爆款倍率 | 最近更新 | 低粉爆款 | 代表作 |',
-  '|---|---|---|---|---|---|---|---|---|',
-  ...accounts
-    .slice(0, 40)
-    .map(
-      (a, i) =>
-        '| ' + (i + 1) + ' | ' + (a.wx_name || '（未补到名）') + ' | ' + a.article_count + ' | ' + fmt(a.read_median) +
-        ' | ' + fmt(a.read_max) + ' | ' + (a.ratio === null ? '-' : a.ratio) + ' | ' + String(a.last_pub).slice(0, 10) +
-        ' | ' + (a.low_fan_signal ? '是' : '') + ' | ' + (a.sample_title || '').replace(/\|/g, '／') + ' |'
-    ),
-  '',
-  '## 口径说明',
-  '',
-  '- 粉丝数拿不到，低粉爆款用「爆款倍率 = 最高阅读 ÷ 阅读中位」做代理指标，≥' + maxRatioFlag + ' 且最高阅读 ≥' + signalReadFloor + '，或最高阅读 ≥100000 记为信号。',
-  '- artlist 只回流高于阅读下限的文章，所以「池内篇数」是被截断后的值，不等于该号发文量。',
-  '- 账号名靠 artinfo 按 __biz 去重补齐，未补到的需人工核实。',
-  '',
-  '## 下一步',
-  '',
-  '1. 人工过一遍名单，剔掉不相关的号和明显大号。',
-  '2. 跑 pick-articles.mjs 按规则选爆款文章，再跑 download.mjs 批量下载。',
-];
-writeJson(join(outDir, 'summary.json'), {
-  track,
-  pool: pool.length,
-  accounts: accounts.length,
-  low_fan_signals: flagged.length,
-  named: accounts.filter((a) => a.wx_name).length,
-  failures: failures.length,
-});
-writeJson(join(outDir, 'failures.json'), failures);
-writeText(join(outDir, 'report-accounts.md'), report.join('\n') + '\n');
-saveBudget(outDir, budget, { stage: 'find-accounts', pool: pool.length, accounts: accounts.length });
-
-console.log('\n候选账号 ' + accounts.length + ' 个（低粉爆款信号 ' + flagged.length + ' 个），已写：');
-console.log('  ' + join(outDir, 'accounts.csv'));
-console.log('  ' + join(outDir, 'report-accounts.md'));
-console.log('  ' + join(outDir, 'pool.json') + '（第 4 步复用）');
-if (failures.length) console.log('失败 ' + failures.length + ' 条，见 failures.json');
+const relevance = row => preferred?.test(row.title) ? 1 : 0;
+const candidates = [...byBiz].map(([biz, rows]) => {
+  rows.sort((a,b) => relevance(b)-relevance(a) || String(b.pub_time).localeCompare(String(a.pub_time)) || b.read_num-a.read_num);
+  return {biz,rows,anchor:rows[0]};
+}).sort((a,b) => relevance(b.anchor)-relevance(a.anchor) || a.anchor.read_num-b.anchor.read_num);
+try {
+  for (const {biz, rows, anchor} of candidates.slice(0, verifyTop)) {
+    if (stopped) break;
+    const window = baselineWindow(anchor.pub_time, baselineDays);
+    if (!window) { failures.push({api:'baseline',note:biz,code:'INVALID_DATE'}); continue; }
+    const baselineMap = new Map();
+    let truncated = false;
+    if (dry) {
+      for (let i = 0; i < 12; i++) {
+        const row = {...anchor,sn:anchor.sn+'normal'+i,pub_time:window.start,read_num:biz==='DRYBIZ4'||biz==='DRYBIZ5'?80+i*10:5000+i*100};
+        baselineMap.set(articleKey(row), row);
+      }
+      baselineMap.set(articleKey(anchor), anchor);
+      names[biz] = {name:anchor.wx_name};
+    } else {
+      for (const month of window.months) {
+        const cacheKey = biz + ':' + month;
+        let cached = accountCache[cacheKey];
+        if (!cached || cached.pages < baselinePages && cached.truncated) {
+          const monthRows = new Map(); let cursor = ''; let pages = 0; let more = false; let failed = false;
+          for (let page = 1; page <= baselinePages; page++) {
+            const j = await request('artlist', {month,wx_biz:biz,min_read_num:0,...(cursor?{cursor}:{})}, 'baseline:'+cacheKey+':p'+page);
+            if (j?.code !== 0) {failed = true; break;}
+            const items = j.data?.list || []; pages = page;
+            for (const it of items) {
+              const row = normalize(it, '', 'account:' + month);
+              if (row.wx_biz !== biz) continue;
+              const id = articleKey(row); if (id) monthRows.set(id,row);
+            }
+            cursor = j.data?.cursor || ''; more = !!cursor && items.length > 0;
+            if (!more) break;
+          }
+          cached = {rows:[...monthRows.values()],pages,truncated:more,failed};
+          accountCache[cacheKey] = cached; checkpoint();
+        }
+        truncated ||= cached.truncated || cached.failed;
+        for (const row of cached.rows) {
+          const pub = String(row.pub_time).slice(0,10);
+          if (pub >= window.start && pub <= window.end) baselineMap.set(articleKey(row),row);
+        }
+      }
+    }
+    // 发现池只提供候选，不能往基线补入“只搜到的高阅读文章”。
+    const baseline = [...baselineMap.values()];
+    const stats = readingStats(baseline);
+    const account = {
+      wx_biz:biz,wx_name:names[biz]?.name||anchor.wx_name||'',article_count:rows.length,
+      baseline_verified:stats.known >= minSamples,baseline_total:stats.total,baseline_known:stats.known,baseline_missing:stats.missing,
+      baseline_start:window.start,baseline_end:window.end,baseline_date_min:stats.date_min,baseline_date_max:stats.date_max,
+      baseline_truncated:truncated,read_mean:stats.mean,read_median:stats.median,read_max:stats.max,
+      ratio:stats.median>0?Math.round(stats.max/stats.median*100)/100:null,
+      last_pub:stats.date_max||'',censored:stats.censored,low_fan_signal:false,
+      sample_title:anchor.title,top_art_url:anchor.art_url,top_keyword:anchor.keyword,
+    };
+    const related = [...new Map([...rows,...baseline.filter(r=>!must||must.test(r.title+' '+r.desc))].map(r=>[articleKey(r),r])).values()];
+    const verifiedArticles = related.filter(row => articleSignal(row,account,{medianMax,minSamples,minRead:signalRead,minRatio:signalRatio}).low).sort((a,b)=>b.read_num-a.read_num);
+    account.low_fan_signal = verifiedArticles.length>0;
+    account.verified_article_count = verifiedArticles.length;
+    if (verifiedArticles.length) {
+      const best = verifiedArticles[0]; account.sample_title=best.title;account.top_art_url=best.art_url;
+      account.signal_ratio=articleSignal(best,account,{medianMax,minSamples,minRead:signalRead,minRatio:signalRatio}).ratio;
+      for (const row of verifiedArticles) poolMap.set(articleKey(row),row);
+    }
+    if (!dry && account.low_fan_signal && !account.wx_name) {
+      const j = await request('artinfo',{url:account.top_art_url},'name:'+biz);
+      if (j?.code===0 && j.data?.name) {
+        names[biz]={name:clean(j.data.name),user_name:j.data.user_name||'',signature:clean(j.data.signature||'')};
+        account.wx_name=names[biz].name;
+      }
+    }
+    if (excluded.has(account.wx_name)) continue;
+    accounts.push(account); checkpoint();
+    console.log((account.wx_name||biz)+'｜样本 '+stats.known+'｜中位 '+fmt(stats.median)+'｜相关爆款 '+verifiedArticles.length+'｜'+(account.low_fan_signal?'低日常阅读信号':'未符合/不足'));
+    if (targetAccounts && accounts.filter(a=>a.low_fan_signal&&a.wx_name).length >= targetAccounts) break;
+  }
+} catch(e) { if (!(e instanceof BudgetStop)) throw e; stopped = true; console.log(e.message); }
+accounts.sort((a,b)=>Number(b.low_fan_signal)-Number(a.low_fan_signal)||(b.signal_ratio||0)-(a.signal_ratio||0));
+const flagged = accounts.filter(a=>a.low_fan_signal);
+checkpoint();
+writeJson(join(outDir,'config.json'),{track,keywords,must:mustWords,months:monthsN,pages:pagesN,'min-read':minRead,'max-yuan':maxYuan,'baseline-median-max':medianMax,'baseline-min-samples':minSamples,'signal-read':signalRead,'signal-ratio':signalRatio,'baseline-days':baselineDays,out:outDir});
+writeCsv(join(outDir,'accounts.csv'),['账号','wx_biz','样本篇数','有效阅读篇数','缺失篇数','样本均读','阅读中位数','样本最高阅读','账号倍率','代表作倍率','低日常阅读爆款','基线起日','基线止日','分页截断','代表作','原文链接','粉丝数'],accounts.map(a=>({
+  账号:a.wx_name,wx_biz:a.wx_biz,样本篇数:a.baseline_total,有效阅读篇数:a.baseline_known,缺失篇数:a.baseline_missing,样本均读:a.read_mean,阅读中位数:a.read_median,样本最高阅读:a.read_max,账号倍率:a.ratio,代表作倍率:a.signal_ratio,低日常阅读爆款:a.low_fan_signal?'是':'',基线起日:a.baseline_start,基线止日:a.baseline_end,分页截断:a.baseline_truncated?'是':'',代表作:a.sample_title,原文链接:a.top_art_url,粉丝数:'不可见',
+})));
+const report=['# 对标账号候选 · '+track,'','- 日期：'+today(),'','- 候选账号已核查 '+accounts.length+' 个；低日常阅读爆款信号 '+flagged.length+' 个。粉丝数不可见。','- 基线按账号查询，取消关键词和阅读门槛；取候选爆款发布日及之前 '+baselineDays+' 天。','- 中位数 <'+medianMax+'，有效样本 ≥'+minSamples+'，单篇 ≥'+signalRead+' 且倍率 ≥'+signalRatio+'；十万阅读不会自动判低粉。','',
+'| 账号 | 样本数 | 样本均读 | 中位数 | 相关爆款倍率 | 信号 | 基线日期 | 代表作 |',
+'|---|---:|---:|---:|---:|---|---|---|',
+...accounts.map(a=>'| '+(a.wx_name||a.wx_biz)+' | '+a.baseline_known+' | '+fmt(a.read_mean)+' | '+fmt(a.read_median)+' | '+fmt(a.signal_ratio)+' | '+(a.low_fan_signal?'是':'待核实/未符合')+' | '+a.baseline_start+'—'+a.baseline_end+' | ['+a.sample_title.replace(/\|/g,'／')+']('+a.top_art_url+') |'),'',
+'- 这些是库中样本，不是已经证明完整的账号月均；缺失不补零，真实零阅读计入。分页截断见 accounts.csv。','- 历史爆款使用当时窗口；实时峰值不能与旧中位数混算精确新倍率。10万＋为下界，不能推算真实值。','- 已有本轮关键词、账号数和文章数授权时按授权继续出清单；下载正文仍等用户明确确认。'];
+writeText(join(outDir,'report-accounts.md'),report.join('\n')+'\n');
+writeJson(join(outDir,'summary.json'),{track,pool:poolMap.size,accounts:accounts.length,low_fan_signals:flagged.length,named:flagged.filter(a=>a.wx_name).length,failures:failures.length,budget_stopped:stopped});
+saveBudget(outDir,budget,{stage:'find-accounts',pool:poolMap.size,accounts:accounts.length});
+console.log('已写账号报告：'+join(outDir,'report-accounts.md'));

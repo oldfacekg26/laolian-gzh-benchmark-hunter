@@ -77,7 +77,7 @@ export class Budget {
     const rows = Object.keys(this.calls)
       .sort()
       .map((a) => '  ' + a + '：' + this.calls[a] + ' 次 × ¥' + priceOf(a).toFixed(2));
-    const head = '预算上限 ¥' + this.cap.toFixed(2) + '｜实际花费 ¥' + this.spent.toFixed(2);
+    const head = '预算上限 ¥' + this.cap.toFixed(2) + '｜保守记账 ¥' + this.spent.toFixed(2);
     return [head, ...rows].join('\n');
   }
 }

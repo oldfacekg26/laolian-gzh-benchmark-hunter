@@ -4,7 +4,7 @@
 
 这是一个供 Codex 读取并执行的中文 Skill，适合做公众号对标研究、整理文章素材库。免费通道负责下载公开文章，付费数据通道负责搜索和读取阅读量；二者分别选择。
 
-[下载 v1.2.1 安装包](https://github.com/oldfacekg26/laolian-gzh-benchmark-hunter/releases/tag/v1.2.1) · [MIT 许可证](LICENSE) · [更新记录](CHANGELOG.zh.md)
+[下载 v1.3.0 安装包](https://github.com/oldfacekg26/laolian-gzh-benchmark-hunter/releases/tag/v1.3.0) · [MIT 许可证](LICENSE) · [更新记录](CHANGELOG.zh.md)
 
 ---
 
@@ -12,7 +12,7 @@
 
 把整个 `laolian-gzh-benchmark-hunter` 文件夹放进你的 skills 目录：
 
-在上面的下载页找到 `laolian-gzh-benchmark-hunter-v1.2.1.zip`，解压后取出同名文件夹。最终应能找到 `laolian-gzh-benchmark-hunter/SKILL.md`，避免重复套两层同名目录。
+在上面的下载页找到 `laolian-gzh-benchmark-hunter-v1.3.0.zip`，解压后取出同名文件夹。最终应能找到 `laolian-gzh-benchmark-hunter/SKILL.md`，避免重复套两层同名目录。
 
 - Windows：`C:\Users\你的用户名\.codex\skills\`
 - macOS / Linux：`~/.codex/skills/`
@@ -45,13 +45,13 @@ git clone https://github.com/oldfacekg26/laolian-gzh-benchmark-hunter.git ~/.cod
 给一个赛道**大类词**（中老年 / 读书 / 职场 / 心灵鸡汤 / AI / 养生 / 育儿 ……），它会：
 
 1. 先给你 5-10 个赛道关键词，**等你拍板**
-2. 搜出值得对标的公众号（低粉爆款优先）
+2. 先找过万文章，再按账号查普通文章，找出日常阅读中位数低、某篇突然打爆的公众号
 3. 按固定规则挑出值得下载学习的爆款文章清单，**等你过目**
 4. 你点头后，才批量下载正文 + 配图
 
 **这一步要花钱，必须自备 wxrank 的 Key。** 因为"爆款"的命门是**真实阅读量**，而公众号公开页面把阅读量清空了，免登录抓不到——只有付费接口能给。
 
-参考花费：一轮任务通常 **¥1.5 上下**（8 个关键词 × 近 6 个月）。脚本自带花费上限闸门，付费前先把"接口 × 次数 × 预估金额"报给你，你同意才花钱。
+费用分为关键词发现、按账号核查普通文章、补账号名与可选实时阅读。关键词发现 8 个词 × 6 个月 × 3 页最多约 ¥1.44，基线核查另计，不能把整轮费用固定说成 ¥1.5。脚本默认硬上限 **¥15**，付费前展示完整调用计划与本轮预算，你同意才花钱。续跑计入同一预算。
 
 **没有 wxrank Key 怎么办？充值完全自愿。**
 
@@ -90,7 +90,7 @@ git clone https://github.com/oldfacekg26/laolian-gzh-benchmark-hunter.git ~/.cod
 
 ## 四、几条重要说明（别当成 bug）
 
-- **粉丝数拿不到。** wxrank 不返回粉丝数，所以"低粉爆款"用的是代理指标：**爆款倍率 = 最高阅读 ÷ 阅读中位**。报告里会明写"粉丝数不可见"。
+- **粉丝数拿不到。** wxrank 不返回粉丝数，所以"低粉爆款"用的是代理指标：**爆款倍率 = 最高阅读 ÷ 阅读中位**。报告里会明写"粉丝数不可见"。判定默认要求按账号查询的普通文章有效样本至少 10 条、中位数低于 1000、相关单篇阅读至少 10000 且倍率至少 10；十万阅读不会自动判低粉。每篇文章单独判断，关键词高阅读池不能作为日常基线。
 - **阅读量拿不到就留空。** 免费路没有阅读量，不是"没人看"，只是没走付费接口；要真实数字就开 `--with-read`（¥0.02/篇）或走 `artlist`。
 - **搜狗入口只是可选补充**，默认不用：它**不返回阅读量**（判不了爆款），而且解析出来的多是临时链，要马上下载。
 - 价格、平台规则这类时效信息，用前请重新核实（核实日期见文末）。
@@ -148,4 +148,4 @@ node scripts/sogou-find.mjs --out .validation/sogou --dry-run
 
 ---
 
-最后核实日期：2026-10-06（接口价目与平台规则以 wxrank 官方为准）。
+最后核实日期：2026-10-08（接口价目与平台规则以 wxrank 官方为准）。

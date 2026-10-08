@@ -5,6 +5,7 @@
 //
 // 规则：时间窗 + 阅读下限 + 赛道词必中 + 去重 + 爆款分排序 + 每号上限 + 低粉爆款优先配额。
 import { join } from 'node:path';
+import { articleKey, articleSignal, readValue } from './reading-stats.mjs';
 import {
   buildMustRegex,
   clean,
@@ -35,7 +36,9 @@ const opt = (name, def) => (args[name] !== undefined ? args[name] : cfg[name] !=
 
 const total = num(opt('total', 50), 50);
 const perAccount = num(opt('per-account', 5), 5);
-const minRead = num(opt('min-read', 1000), 1000);
+const minRead = num(opt('min-read', 10000), 10000);
+const onlyLow = truthy(opt('only-low', false));
+const signalOptions = {medianMax:num(opt('baseline-median-max',1000),1000),minSamples:num(opt('baseline-min-samples',10),10),minRead:num(opt('signal-read',10000),10000),minRatio:num(opt('signal-ratio',10),10)};
 const monthsN = num(opt('months', 6), 6);
 const since = String(opt('since', sinceFromMonths(monthsN))).slice(0, 10);
 const mustWords = list(opt('must', cfg.keywords || []));
@@ -62,7 +65,7 @@ if (!pool.length) {
 }
 
 const accByBiz = new Map(accountList.map((a) => [a.wx_biz, a]));
-const scoreOf = (r) => r.read_num * wRead + r.share_num * wShare + r.look_num * wLook + r.like_num * wLike;
+const scoreOf = (r) => (readValue(r.read_num)||0)*wRead + (readValue(r.share_num)||0)*wShare + (readValue(r.look_num)||0)*wLook + (readValue(r.like_num)||0)*wLike;
 
 // ---- 过滤 + 双重去重 ----
 const seenSn = new Set();
@@ -80,7 +83,7 @@ for (const r of pool) {
     droppedTime++;
     continue;
   }
-  if ((r.read_num || 0) < minRead) {
+  if (readValue(r.read_num) === null || r.read_num < minRead) {
     droppedRead++;
     continue;
   }
@@ -99,18 +102,24 @@ for (const r of pool) {
     droppedAccount++;
     continue;
   }
-  const titleKey = clean(r.title);
-  if (seenSn.has(r.sn) || seenTitle.has(titleKey)) {
+  const titleKey = r.wx_biz + ':' + clean(r.title);
+  const id = articleKey(r);
+  const signal = articleSignal(r, acc, signalOptions);
+  if (onlyLow && !signal.low) { droppedAccount++; continue; }
+  if (seenSn.has(id) || seenTitle.has(titleKey)) {
     droppedDup++;
     continue;
   }
-  seenSn.add(r.sn);
+  seenSn.add(id);
   seenTitle.add(titleKey);
   candidates.push({
     ...r,
     爆款分: scoreOf(r),
     账号爆款倍率: acc.ratio === undefined || acc.ratio === null ? '' : acc.ratio,
-    低粉爆款信号: acc.low_fan_signal ? '是' : '',
+    单篇爆款倍率: signal.inWindow ? signal.ratio : null,
+    低粉爆款信号: signal.low ? '是' : '',
+    基线起日: acc.baseline_start || '',
+    基线止日: acc.baseline_end || '',
     wx_name: accName,
   });
 }
@@ -125,20 +134,21 @@ const take = (item) => {
   const key = item.sn;
   if (pickedKeys.has(key)) return false;
   const accKey = item.wx_biz || item.art_url;
-  if ((perAccCount.get(accKey) || 0) >= perAccount) return false;
+  if ((perAccCount.get(accKey) || 0) >= (perAccount || Infinity)) return false;
   perAccCount.set(accKey, (perAccCount.get(accKey) || 0) + 1);
   pickedKeys.add(key);
   picked.push(item);
   return true;
 };
 
-const lowFanTarget = preferLowFan ? Math.ceil(total * lowFanQuota) : 0;
+const limit = total || Infinity;
+const lowFanTarget = preferLowFan ? Math.ceil(limit * lowFanQuota) : 0;
 for (const it of candidates) {
   if (picked.length >= lowFanTarget) break;
   if (it.低粉爆款信号) take(it);
 }
 for (const it of candidates) {
-  if (picked.length >= total) break;
+  if (picked.length >= limit) break;
   take(it);
 }
 
@@ -153,6 +163,9 @@ const rows = picked.map((it, i) => ({
   转发: it.share_num,
   爆款分: it.爆款分,
   账号爆款倍率: it.账号爆款倍率,
+  单篇爆款倍率: it.单篇爆款倍率,
+  基线起日: it.基线起日,
+  基线止日: it.基线止日,
   低粉爆款信号: it.低粉爆款信号,
   发布日期: String(it.pub_time || '').slice(0, 10),
   关键词: it.keyword || '',
@@ -165,7 +178,7 @@ const rows = picked.map((it, i) => ({
 writeJson(join(outDir, 'articles.json'), rows);
 writeCsv(
   join(outDir, 'articles.csv'),
-  ['序号', '标题', '账号', '阅读量', '点赞', '在看', '转发', '爆款分', '账号爆款倍率', '低粉爆款信号', '发布日期', '关键词', '原文链接', '阅读量核实状态'],
+  ['序号', '标题', '账号', '阅读量', '点赞', '在看', '转发', '爆款分', '账号爆款倍率', '单篇爆款倍率', '基线起日', '基线止日', '低粉爆款信号', '发布日期', '关键词', '原文链接', '阅读量核实状态'],
   rows
 );
 
@@ -183,7 +196,7 @@ const report = [
   '- 池内文章：' + pool.length + ' 篇｜过滤后候选：' + candidates.length + ' 篇｜选中：' + rows.length + ' 篇',
   '- 规则：时间窗 ≥ ' + since + '｜阅读 ≥ ' + minRead + '｜赛道词' + (skipMust ? '（未启用）' : '必中：' + mustWords.join(' / ')) +
     '｜爆款分 = 阅读×' + wRead + ' + 转发×' + wShare + ' + 在看×' + wLook + ' + 点赞×' + wLike,
-  '- 每号上限：' + perAccount + ' 篇｜低粉爆款优先配额：' + (preferLowFan ? Math.round(lowFanQuota * 100) + '%' : '关闭'),
+  '- 每号上限：' + (perAccount || '不限制') + ' 篇｜低粉爆款优先配额：' + (preferLowFan ? Math.round(lowFanQuota * 100) + '%' : '关闭'),
   '- 被过滤：时间窗 ' + droppedTime + '｜阅读不足 ' + droppedRead + '｜赛道词不符 ' + droppedMust + '｜账号黑白名单 ' + droppedAccount + '｜重复 ' + droppedDup,
   '',
   '## 选中文章',
@@ -191,11 +204,10 @@ const report = [
   '| # | 标题 | 账号 | 阅读 | 转发 | 爆款分 | 倍率 | 发布日期 |',
   '|---|---|---|---|---|---|---|---|',
   ...rows
-    .slice(0, 60)
     .map(
       (r) =>
         '| ' + r.序号 + ' | ' + String(r.标题).replace(/\|/g, '／') + ' | ' + r.账号 + ' | ' + fmt(r.阅读量) + ' | ' +
-        fmt(r.转发) + ' | ' + fmt(r.爆款分) + ' | ' + fmt(r.账号爆款倍率) + ' | ' + r.发布日期 + ' |'
+        fmt(r.转发) + ' | ' + fmt(r.爆款分) + ' | ' + fmt(r.单篇爆款倍率) + ' | ' + r.发布日期 + ' |'
     ),
   '',
   '## 账号分布（前 12）',

@@ -1,3 +1,4 @@
+import { readingStats, readValue, articleSignal } from './reading-stats.mjs';
 // 「扒一个号」：给一个博主，把它的文章清单拉出来，供批量下载。
 //
 // 两条路，免费在默认位，付费按需开：
@@ -59,7 +60,7 @@ const useSogou = truthy(opt('sogou', false));
 const monthsN = num(opt('months', 6), 6);
 const pagesN = num(opt('pages', realtime ? 3 : 2), realtime ? 3 : 2);
 const minRead = num(opt('min-read', 0), 0);
-const maxYuan = num(opt('max-yuan', 10), 10);
+const maxYuan = num(opt('max-yuan', 15), 15);
 const gapMs = num(opt('gap-ms', 1500), 1500);
 const dry = truthy(opt('dry-run', false));
 const confirmed = truthy(opt('yes', false)) || dry;
@@ -409,7 +410,7 @@ if (dry) {
             title: clean(it.title),
             desc: clean(it.digest || it.desc || '').slice(0, 140),
             pub_time: String(it.pub_time || '').slice(0, 10),
-            read_num: num(it.read_num, 0),
+            read_num: readValue(it.read_num),
             like_num: num(it.like_num, 0),
             look_num: num(it.look_num, 0),
             share_num: num(it.share_num, 0),
@@ -449,7 +450,7 @@ if (withRead && !dry) {
     }
     const j = await call('getrk', { url: r.art_url }, { key, budget, gapMs, note: 'read:' + (r.sn || r.art_url) });
     if (j && j.code === 0 && j.data) {
-      r.read_num = num(j.data.read_num, 0);
+      r.read_num = readValue(j.data.read_num);
       r.like_num = num(j.data.like_num, 0);
       r.look_num = num(j.data.look_num, 0);
       r.share_num = num(j.data.share_num, 0);
@@ -467,10 +468,11 @@ if (withRead && !dry) {
 }
 
 // ---------------- 4. 该号自身的爆款倍率 + 落盘 ----------------
-const reads = pool.filter((r) => Number(r.read_num) > 0).map((r) => Number(r.read_num)).sort((a, b) => a - b);
-const median = reads.length ? reads[Math.floor((reads.length - 1) / 2)] : 0;
-const max = reads.length ? reads[reads.length - 1] : 0;
-const ratio = median > 0 ? Number((max / median).toFixed(2)) : null;
+const stats = readingStats(pool);
+const median = stats.median;
+const max = stats.max;
+const ratio = median > 0 ? Math.round(max / median * 100) / 100 : null;
+const baseline = {baseline_verified:paid && minRead === 0,baseline_known:stats.known,read_median:median,baseline_start:stats.date_min,baseline_end:stats.date_max};
 
 const sorted = pool
   .slice()
@@ -486,7 +488,8 @@ const rows = sorted.map((r, i) => ({
   转发: r.share_num ?? '',
   爆款分: (Number(r.read_num) || 0) + (Number(r.share_num) || 0) * 3 || '',
   账号爆款倍率: ratio === null ? '' : ratio,
-  低粉爆款信号: ratio !== null && ratio >= 3 && max >= 10000 ? '是（该号自身最高/中位）' : '',
+  单篇爆款倍率: articleSignal(r, baseline).ratio,
+  低粉爆款信号: articleSignal(r, baseline).low ? '是（低日常阅读样本）' : '',
   发布日期: String(r.pub_time).slice(0, 10),
   关键词: '',
   原文链接: r.art_url,
@@ -520,7 +523,7 @@ const report = [
   '- 定位：' + (locateNotes.join('；') || '—'),
   '- wx_biz：' + (wxBiz || '未知') + '｜原始ID：' + (wxId || '未知') + '｜合集：' + (albumIds.join(', ') || '无'),
   '- 时间窗：近 ' + monthsN + ' 个月｜文章数：' + rows.length,
-  '- 该号自身：最高阅读 ' + fmt(max) + '｜阅读中位 ' + fmt(median) + '｜爆款倍率 ' + (ratio === null ? '不可算（无阅读量）' : ratio),
+  '- 该号样本：均读 ' + fmt(stats.mean) + '｜有效阅读 ' + stats.known + '/' + stats.total + '｜缺失 ' + stats.missing + '｜最高阅读 ' + fmt(max) + '｜阅读中位 ' + fmt(median) + '｜爆款倍率 ' + (ratio === null ? '不可算（无阅读量）' : ratio),
   '- 粉丝数：不可见（wxrank 不提供）',
   '',
   '## 文章清单（按发布时间倒序）',
