@@ -4,7 +4,7 @@
 
 这是一个供 Codex 读取并执行的中文 Skill，适合做公众号对标研究、整理文章素材库。免费通道负责下载公开文章，付费数据通道负责搜索和读取阅读量；二者分别选择。
 
-[下载 v1.2.0 安装包](https://github.com/oldfacekg26/laolian-gzh-benchmark-hunter/releases/tag/v1.2.0) · [MIT 许可证](LICENSE) · [更新记录](CHANGELOG.zh.md)
+[下载 v1.2.1 安装包](https://github.com/oldfacekg26/laolian-gzh-benchmark-hunter/releases/tag/v1.2.1) · [MIT 许可证](LICENSE) · [更新记录](CHANGELOG.zh.md)
 
 ---
 
@@ -12,7 +12,7 @@
 
 把整个 `laolian-gzh-benchmark-hunter` 文件夹放进你的 skills 目录：
 
-在上面的下载页找到 `laolian-gzh-benchmark-hunter-v1.2.0.zip`，解压后取出同名文件夹。最终应能找到 `laolian-gzh-benchmark-hunter/SKILL.md`，避免重复套两层同名目录。
+在上面的下载页找到 `laolian-gzh-benchmark-hunter-v1.2.1.zip`，解压后取出同名文件夹。最终应能找到 `laolian-gzh-benchmark-hunter/SKILL.md`，避免重复套两层同名目录。
 
 - Windows：`C:\Users\你的用户名\.codex\skills\`
 - macOS / Linux：`~/.codex/skills/`
@@ -53,10 +53,18 @@ git clone https://github.com/oldfacekg26/laolian-gzh-benchmark-hunter.git ~/.cod
 
 参考花费：一轮任务通常 **¥1.5 上下**（8 个关键词 × 近 6 个月）。脚本自带花费上限闸门，付费前先把"接口 × 次数 × 预估金额"报给你，你同意才花钱。
 
-**Key 怎么配**（二选一，**不要把 Key 贴进对话或发给别人**）：
+**没有 wxrank Key 怎么办？充值完全自愿。**
+
+如果你愿意使用搜爆款、指定公众号的付费历史清单或补阅读量等付费功能，可以前往 **[wxrank 官网](https://data.wxrank.com/)** 自行登录，按官网说明获取 API Key，并按需充值。操作方式、最低充值额和价格以官网为准。
+
+**不充值也能使用免费功能**：给链接下载正文和配图、通过公众号合集批量下载（仅覆盖合集内文章），都不需要 Key。安装本 Skill 不要求充值；选择免费功能时，不会要求你配置 Key。不想充值，可以停止付费步骤，选择免费功能。
+
+获取 Key 后按下面任选一种方式在本地配置。**不要把 Key 贴进对话、报告、config.json 或 GitHub，也不要发给别人。**
 
 1. 设置环境变量 `WXRANK_KEY`
 2. 在本文件夹里新建文本文件 `wxrank.key`，里面只写一行 Key
+
+配置 Key 或充值不等于同意任何一轮付费调用。每轮仍先报预算，得到你的确认后才执行。积分不足时会停下，提示你自行决定是否去官网充值。
 
 ### ② 下单篇（免费）
 

@@ -41,10 +41,14 @@ export function loadKey(explicit) {
   const key = candidates.map((s) => String(s || '').trim()).find(Boolean);
   if (!key) {
     throw new Error(
-      '缺少 wxrank Key。任选一种方式配置：\n' +
+      '缺少 wxrank Key。当前选择的付费功能需要 Key 和足够积分。\n' +
+        '充值完全自愿；不充值仍可使用免费正文配图下载和免费合集下载（仅覆盖合集内文章）。\n' +
+        '若自愿使用付费功能，请前往 https://data.wxrank.com/ 自行登录，按官网说明获取 API Key 并按需充值。\n' +
+        '不想充值可停止本次付费步骤，选择免费功能。获取 Key 后任选一种方式在本地配置：\n' +
         '  1) 设置环境变量 WXRANK_KEY\n' +
         '  2) 在 ' + keyFile + ' 里写入 Key（只写一行）\n' +
-        '见 references/wxrank-api.md。不要把 Key 贴进对话、config.json 或报告。'
+        '见 references/wxrank-api.md。不要把 Key 贴进对话、config.json、报告或 GitHub。\n' +
+        '配置后仍需先查看本轮预算并确认，才会执行付费请求。'
     );
   }
   return key;
