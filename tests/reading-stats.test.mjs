@@ -26,6 +26,7 @@ test('大号十万、样本不足与窗口外文章不冒充低日常阅读爆�
   assert.equal(articleSignal({...article,read_num:100001},{...account,read_median:30000}).low,false);
   assert.equal(articleSignal(article,{...account,baseline_known:2}).low,false);
   assert.equal(articleSignal({...article,pub_time:'2026-08-20'},account).low,false);
+  assert.equal(articleSignal({...article,content_type:'book'},{...account,baseline_content_type:'article'}).low,false);
   assert.equal(baselineWindow('2026-03-01').start,'2026-01-31');
 });
 

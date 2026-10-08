@@ -118,6 +118,7 @@ for (const r of pool.slice().sort((a,b) => scoreOf(b) - scoreOf(a))) {
     账号爆款倍率: acc.ratio === undefined || acc.ratio === null ? '' : acc.ratio,
     单篇爆款倍率: signal.inWindow ? signal.ratio : null,
     低粉爆款信号: signal.low ? '是' : '',
+    内容类型: r.content_type || '',
     基线起日: acc.baseline_start || '',
     基线止日: acc.baseline_end || '',
     wx_name: accName,
@@ -164,6 +165,7 @@ const rows = picked.map((it, i) => ({
   爆款分: it.爆款分,
   账号爆款倍率: it.账号爆款倍率,
   单篇爆款倍率: it.单篇爆款倍率,
+  内容类型: it.内容类型,
   基线起日: it.基线起日,
   基线止日: it.基线止日,
   低粉爆款信号: it.低粉爆款信号,
@@ -178,7 +180,7 @@ const rows = picked.map((it, i) => ({
 writeJson(join(outDir, 'articles.json'), rows);
 writeCsv(
   join(outDir, 'articles.csv'),
-  ['序号', '标题', '账号', '阅读量', '点赞', '在看', '转发', '爆款分', '账号爆款倍率', '单篇爆款倍率', '基线起日', '基线止日', '低粉爆款信号', '发布日期', '关键词', '原文链接', '阅读量核实状态'],
+  ['序号', '标题', '账号', '阅读量', '点赞', '在看', '转发', '爆款分', '账号爆款倍率', '单篇爆款倍率', '基线起日', '基线止日', '内容类型', '低粉爆款信号', '发布日期', '关键词', '原文链接', '阅读量核实状态'],
   rows
 );
 

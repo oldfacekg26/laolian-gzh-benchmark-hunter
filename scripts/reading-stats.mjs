@@ -58,7 +58,8 @@ export function articleSignal(article, account, { medianMax = 1000, minSamples =
   const median = readValue(account.read_median);
   const pub = String(article.pub_time || '').slice(0, 10);
   const inWindow = !!pub && pub >= account.baseline_start && pub <= account.baseline_end;
-  const ratio = read !== null && median > 0 ? Math.round(read / median * 100) / 100 : null;
-  const valid = account.baseline_verified === true && account.baseline_known >= minSamples && median > 0 && median < medianMax && inWindow;
+  const sameType = !account.baseline_content_type || article.content_type === account.baseline_content_type;
+  const ratio = sameType && read !== null && median > 0 ? Math.round(read / median * 100) / 100 : null;
+  const valid = account.baseline_verified === true && account.baseline_known >= minSamples && median > 0 && median < medianMax && inWindow && sameType;
   return { ratio, low: !!(valid && read >= minRead && read / median >= minRatio), inWindow };
 }

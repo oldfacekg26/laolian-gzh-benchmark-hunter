@@ -1,4 +1,4 @@
-import { readingStats, readValue, articleSignal } from './reading-stats.mjs';
+import { readingStats, readValue, articleSignal, baselineWindow } from './reading-stats.mjs';
 // 「扒一个号」：给一个博主，把它的文章清单拉出来，供批量下载。
 //
 // 两条路，免费在默认位，付费按需开：
@@ -410,6 +410,7 @@ if (dry) {
             title: clean(it.title),
             desc: clean(it.digest || it.desc || '').slice(0, 140),
             pub_time: String(it.pub_time || '').slice(0, 10),
+            content_type: String(it.content_type || ''),
             read_num: readValue(it.read_num),
             like_num: num(it.like_num, 0),
             look_num: num(it.look_num, 0),
@@ -472,7 +473,12 @@ const stats = readingStats(pool);
 const median = stats.median;
 const max = stats.max;
 const ratio = median > 0 ? Math.round(max / median * 100) / 100 : null;
-const baseline = {baseline_verified:paid && minRead === 0,baseline_known:stats.known,read_median:median,baseline_start:stats.date_min,baseline_end:stats.date_max};
+function baselineFor(r) {
+  const w = baselineWindow(r.pub_time, 30);
+  const subset = w && r.content_type ? pool.filter(row=>row.content_type===r.content_type && String(row.pub_time).slice(0,10)>=w.start && String(row.pub_time).slice(0,10)<=w.end) : [];
+  const s = readingStats(subset);
+  return {baseline_verified:paid && minRead === 0 && !!r.content_type,baseline_content_type:r.content_type,baseline_known:s.known,read_median:s.median,baseline_start:w?.start,baseline_end:w?.end};
+}
 
 const sorted = pool
   .slice()
@@ -488,8 +494,9 @@ const rows = sorted.map((r, i) => ({
   转发: r.share_num ?? '',
   爆款分: (Number(r.read_num) || 0) + (Number(r.share_num) || 0) * 3 || '',
   账号爆款倍率: ratio === null ? '' : ratio,
-  单篇爆款倍率: articleSignal(r, baseline).ratio,
-  低粉爆款信号: articleSignal(r, baseline).low ? '是（低日常阅读样本）' : '',
+  单篇爆款倍率: articleSignal(r, baselineFor(r)).ratio,
+  低粉爆款信号: articleSignal(r, baselineFor(r)).low ? '是（低日常阅读样本）' : '',
+  内容类型: r.content_type || '',
   发布日期: String(r.pub_time).slice(0, 10),
   关键词: '',
   原文链接: r.art_url,
@@ -523,7 +530,7 @@ const report = [
   '- 定位：' + (locateNotes.join('；') || '—'),
   '- wx_biz：' + (wxBiz || '未知') + '｜原始ID：' + (wxId || '未知') + '｜合集：' + (albumIds.join(', ') || '无'),
   '- 时间窗：近 ' + monthsN + ' 个月｜文章数：' + rows.length,
-  '- 该号样本：均读 ' + fmt(stats.mean) + '｜有效阅读 ' + stats.known + '/' + stats.total + '｜缺失 ' + stats.missing + '｜最高阅读 ' + fmt(max) + '｜阅读中位 ' + fmt(median) + '｜爆款倍率 ' + (ratio === null ? '不可算（无阅读量）' : ratio),
+  '- 该号混合类型样本（不是纯长图文基线）：均读 ' + fmt(stats.mean) + '｜有效阅读 ' + stats.known + '/' + stats.total + '｜缺失 ' + stats.missing + '｜最高阅读 ' + fmt(max) + '｜阅读中位 ' + fmt(median) + '｜爆款倍率 ' + (ratio === null ? '不可算（无阅读量）' : ratio),
   '- 粉丝数：不可见（wxrank 不提供）',
   '',
   '## 文章清单（按发布时间倒序）',
