@@ -4,7 +4,7 @@
 
 这是一个供 Codex 读取并执行的中文 Skill，适合做公众号对标研究、整理文章素材库。免费通道负责下载公开文章，付费数据通道负责搜索和读取阅读量；二者分别选择。
 
-[下载 v1.3.0 安装包](https://github.com/oldfacekg26/laolian-gzh-benchmark-hunter/releases/tag/v1.3.0) · [MIT 许可证](LICENSE) · [更新记录](CHANGELOG.zh.md)
+[下载 v1.3.1 安装包](https://github.com/oldfacekg26/laolian-gzh-benchmark-hunter/releases/tag/v1.3.1) · [MIT 许可证](LICENSE) · [更新记录](CHANGELOG.zh.md)
 
 ---
 
@@ -12,7 +12,7 @@
 
 把整个 `laolian-gzh-benchmark-hunter` 文件夹放进你的 skills 目录：
 
-在上面的下载页找到 `laolian-gzh-benchmark-hunter-v1.3.0.zip`，解压后取出同名文件夹。最终应能找到 `laolian-gzh-benchmark-hunter/SKILL.md`，避免重复套两层同名目录。
+在上面的下载页找到 `laolian-gzh-benchmark-hunter-v1.3.1.zip`，解压后取出同名文件夹。最终应能找到 `laolian-gzh-benchmark-hunter/SKILL.md`，避免重复套两层同名目录。
 
 - Windows：`C:\Users\你的用户名\.codex\skills\`
 - macOS / Linux：`~/.codex/skills/`
