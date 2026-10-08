@@ -1,0 +1,20 @@
+# Credentials
+*.key
+*.pem
+*.p12
+.env
+.env.*
+!.env.example
+config.env
+
+# Generated article archives, test results and local files
+gzh-bench/
+output/
+outputs/
+artifacts/
+.validation/
+node_modules/
+*.log
+*.zip
+.DS_Store
+Thumbs.db
