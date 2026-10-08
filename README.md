@@ -4,7 +4,7 @@
 
 这是一个供 Codex 读取并执行的中文 Skill，适合做公众号对标研究、整理文章素材库。免费通道负责下载公开文章，付费数据通道负责搜索和读取阅读量；二者分别选择。
 
-[下载 v1.3.1 安装包](https://github.com/oldfacekg26/laolian-gzh-benchmark-hunter/releases/tag/v1.3.1) · [MIT 许可证](LICENSE) · [更新记录](CHANGELOG.zh.md)
+[下载 v1.3.2 安装包](https://github.com/oldfacekg26/laolian-gzh-benchmark-hunter/releases/tag/v1.3.2) · [MIT 许可证](LICENSE) · [更新记录](CHANGELOG.zh.md)
 
 ---
 
@@ -12,7 +12,7 @@
 
 把整个 `laolian-gzh-benchmark-hunter` 文件夹放进你的 skills 目录：
 
-在上面的下载页找到 `laolian-gzh-benchmark-hunter-v1.3.1.zip`，解压后取出同名文件夹。最终应能找到 `laolian-gzh-benchmark-hunter/SKILL.md`，避免重复套两层同名目录。
+在上面的下载页找到 `laolian-gzh-benchmark-hunter-v1.3.2.zip`，解压后取出同名文件夹。最终应能找到 `laolian-gzh-benchmark-hunter/SKILL.md`，避免重复套两层同名目录。
 
 - Windows：`C:\Users\你的用户名\.codex\skills\`
 - macOS / Linux：`~/.codex/skills/`
@@ -90,7 +90,7 @@ git clone https://github.com/oldfacekg26/laolian-gzh-benchmark-hunter.git ~/.cod
 
 ## 四、几条重要说明（别当成 bug）
 
-- **粉丝数拿不到。** wxrank 不返回粉丝数，所以"低粉爆款"用的是代理指标：**爆款倍率 = 最高阅读 ÷ 阅读中位**。报告里会明写"粉丝数不可见"。判定默认要求按账号查询并与爆文同一 content_type 的普通文章有效样本至少 10 条、中位数低于 1000、相关单篇阅读至少 10000 且倍率至少 10；十万阅读不会自动判低粉。每篇文章单独判断，关键词高阅读池不能作为日常基线。
+- **粉丝数拿不到。** wxrank 不返回粉丝数，所以"低粉爆款"用的是代理指标：**单篇爆款倍率 = 单篇阅读 ÷ 同类型首条样本阅读中位数**。报告里会明写"粉丝数不可见"。判定默认要求按账号查询并与爆文同一 content_type 的首条（idx=1）有效样本至少 10 条、中位数低于 1000、相关单篇阅读至少 10000 且倍率至少 10；十万阅读不会自动判低粉。每篇文章单独判断，关键词高阅读池不能作为日常基线。
 - **阅读量拿不到就留空。** 免费路没有阅读量，不是"没人看"，只是没走付费接口；要真实数字就开 `--with-read`（¥0.02/篇）或走 `artlist`。
 - **搜狗入口只是可选补充**，默认不用：它**不返回阅读量**（判不了爆款），而且解析出来的多是临时链，要马上下载。
 - 价格、平台规则这类时效信息，用前请重新核实（核实日期见文末）。

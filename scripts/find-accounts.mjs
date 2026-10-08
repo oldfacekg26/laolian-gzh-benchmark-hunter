@@ -5,7 +5,7 @@ import {
   list, loadKey, parseArgs, priceOf, readJson, samplePool, saveBudget, sleepMs, snOf,
   today, trackSlug, truthy, writeCsv, writeJson, writeText,
 } from './lib.mjs';
-import { articleKey, articleSignal, baselineWindow, readingStats, readValue } from './reading-stats.mjs';
+import { articleKey, articleSignal, baselineWindow, baselineRows, readingStats, readValue } from './reading-stats.mjs';
 
 const args = parseArgs(process.argv.slice(2));
 const cfg = readJson(args.config, {});
@@ -48,7 +48,7 @@ const baselineMonths = Math.ceil(baselineDays / 28) + 1;
 const estimate = searchPlan * priceOf('artlist') + verifyTop * baselineMonths * baselinePages * priceOf('artlist') + (verifyTop + nameTop) * priceOf('artinfo');
 console.log('赛道：' + track + '\n关键词：' + keywords.join(' / '));
 console.log('发现：阅读 ≥' + minRead + (maxRead ? ' 且 ≤' + maxRead : '') + '；核查：按号查询，阅读下限为 0，无关键词');
-console.log('基线：爆款发布日期及之前 ' + baselineDays + ' 天；有效样本 ≥' + minSamples + '，中位数 <' + medianMax + '，单篇 ≥' + signalRead + ' 且倍率 ≥' + signalRatio);
+console.log('基线：同类型首条，爆款发布日期及之前 ' + baselineDays + ' 天；有效样本 ≥' + minSamples + '，中位数 <' + medianMax + '，单篇 ≥' + signalRead + ' 且倍率 ≥' + signalRatio);
 console.log('调用计划上限：搜索 artlist ' + searchPlan + ' 次；基线 artlist ' + (verifyTop * baselineMonths * baselinePages) + ' 次；artinfo ' + (verifyTop + nameTop) + ' 次；理论估算 ¥' + estimate.toFixed(2) + '，硬上限 ¥' + maxYuan.toFixed(2));
 if (!confirmed) { console.log('未确认，未调用付费接口。'); process.exit(0); }
 const key = dry ? '' : loadKey();
@@ -145,9 +145,11 @@ try {
     let truncated = false;
     if (dry) {
       for (let i = 0; i < 12; i++) {
-        const row = {...anchor,sn:anchor.sn+'normal'+i,pub_time:window.start,read_num:biz==='DRYBIZ4'||biz==='DRYBIZ5'?80+i*10:5000+i*100};
+        const row = {...anchor,content_type:anchor.content_type||'article',art_url:'https://mp.weixin.qq.com/s?idx=1&sn='+anchor.sn+'normal'+i,sn:anchor.sn+'normal'+i,pub_time:window.start,read_num:biz==='DRYBIZ4'||biz==='DRYBIZ5'?80+i*10:5000+i*100};
         baselineMap.set(articleKey(row), row);
       }
+      anchor.content_type ||= 'article';
+      anchor.art_url += '&idx=1';
       baselineMap.set(articleKey(anchor), anchor);
       names[biz] = {name:anchor.wx_name};
     } else {
@@ -179,11 +181,11 @@ try {
       }
     }
     // 发现池只提供候选，不能往基线补入“只搜到的高阅读文章”。
-    const baseline = [...baselineMap.values()].filter(r => !anchor.content_type || r.content_type === anchor.content_type);
+    const baseline = baselineRows([...baselineMap.values()], anchor.content_type, window);
     const stats = readingStats(baseline);
     const account = {
       wx_biz:biz,wx_name:names[biz]?.name||anchor.wx_name||'',article_count:rows.length,
-      baseline_content_type:anchor.content_type || '',
+      baseline_content_type:anchor.content_type || '',baseline_position:1,
       baseline_verified:stats.known >= minSamples && (!!anchor.content_type || dry),baseline_total:stats.total,baseline_known:stats.known,baseline_missing:stats.missing,
       baseline_start:window.start,baseline_end:window.end,baseline_date_min:stats.date_min,baseline_date_max:stats.date_max,
       baseline_truncated:truncated,read_mean:stats.mean,read_median:stats.median,read_max:stats.max,
@@ -191,7 +193,7 @@ try {
       last_pub:stats.date_max||'',censored:stats.censored,low_fan_signal:false,
       sample_title:anchor.title,top_art_url:anchor.art_url,top_keyword:anchor.keyword,
     };
-    const related = [...new Map([...rows,...baseline.filter(r=>!must||must.test(r.title+' '+r.desc))].map(r=>[articleKey(r),r])).values()];
+    const related = [...new Map([...rows,...[...baselineMap.values()].filter(r=>!must||must.test(r.title+' '+r.desc))].map(r=>[articleKey(r),r])).values()];
     const verifiedArticles = related.filter(row => articleSignal(row,account,{medianMax,minSamples,minRead:signalRead,minRatio:signalRatio}).low).sort((a,b)=>b.read_num-a.read_num);
     account.low_fan_signal = verifiedArticles.length>0;
     account.verified_article_count = verifiedArticles.length;
@@ -217,10 +219,10 @@ accounts.sort((a,b)=>Number(b.low_fan_signal)-Number(a.low_fan_signal)||(b.signa
 const flagged = accounts.filter(a=>a.low_fan_signal);
 checkpoint();
 writeJson(join(outDir,'config.json'),{track,keywords,must:mustWords,months:monthsN,pages:pagesN,'min-read':minRead,'max-yuan':maxYuan,'baseline-median-max':medianMax,'baseline-min-samples':minSamples,'signal-read':signalRead,'signal-ratio':signalRatio,'baseline-days':baselineDays,out:outDir});
-writeCsv(join(outDir,'accounts.csv'),['账号','wx_biz','样本篇数','有效阅读篇数','缺失篇数','样本均读','阅读中位数','样本最高阅读','账号倍率','代表作倍率','低日常阅读爆款','基线起日','基线止日','分页截断','内容类型','代表作','原文链接','粉丝数'],accounts.map(a=>({
-  账号:a.wx_name,wx_biz:a.wx_biz,样本篇数:a.baseline_total,有效阅读篇数:a.baseline_known,缺失篇数:a.baseline_missing,样本均读:a.read_mean,阅读中位数:a.read_median,样本最高阅读:a.read_max,账号倍率:a.ratio,代表作倍率:a.signal_ratio,低日常阅读爆款:a.low_fan_signal?'是':'',基线起日:a.baseline_start,基线止日:a.baseline_end,分页截断:a.baseline_truncated?'是':'',内容类型:a.baseline_content_type,代表作:a.sample_title,原文链接:a.top_art_url,粉丝数:'不可见',
+writeCsv(join(outDir,'accounts.csv'),['账号','wx_biz','样本篇数','有效阅读篇数','缺失篇数','样本均读','阅读中位数','样本最高阅读','账号倍率','代表作倍率','低日常阅读爆款','基线起日','基线止日','分页截断','内容类型','基线位置','代表作','原文链接','粉丝数'],accounts.map(a=>({
+  账号:a.wx_name,wx_biz:a.wx_biz,样本篇数:a.baseline_total,有效阅读篇数:a.baseline_known,缺失篇数:a.baseline_missing,样本均读:a.read_mean,阅读中位数:a.read_median,样本最高阅读:a.read_max,账号倍率:a.ratio,代表作倍率:a.signal_ratio,低日常阅读爆款:a.low_fan_signal?'是':'',基线起日:a.baseline_start,基线止日:a.baseline_end,分页截断:a.baseline_truncated?'是':'',内容类型:a.baseline_content_type,基线位置:'首条',代表作:a.sample_title,原文链接:a.top_art_url,粉丝数:'不可见',
 })));
-const report=['# 对标账号候选 · '+track,'','- 日期：'+today(),'','- 候选账号已核查 '+accounts.length+' 个；低日常阅读爆款信号 '+flagged.length+' 个。粉丝数不可见。','- 基线按账号查询，取消关键词和阅读门槛，与候选爆款比较同一 content_type；取该号最新相关过万内容发布日及之前 '+baselineDays+' 天。','- 中位数 <'+medianMax+'，有效样本 ≥'+minSamples+'，单篇 ≥'+signalRead+' 且倍率 ≥'+signalRatio+'；十万阅读不会自动判低粉。','',
+const report=['# 对标账号候选 · '+track,'','- 日期：'+today(),'','- 候选账号已核查 '+accounts.length+' 个；低日常阅读爆款信号 '+flagged.length+' 个。粉丝数不可见。','- 基线按账号查询，取消关键词和阅读门槛，只取与候选爆款同一 content_type 的首条（idx=1）；取该号最新相关过万内容发布日及之前 '+baselineDays+' 天。','- 中位数 <'+medianMax+'，有效样本 ≥'+minSamples+'，单篇 ≥'+signalRead+' 且倍率 ≥'+signalRatio+'；十万阅读不会自动判低粉。','',
 '| 账号 | 样本数 | 样本均读 | 中位数 | 相关爆款倍率 | 信号 | 基线日期 | 代表作 |',
 '|---|---:|---:|---:|---:|---|---|---|',
 ...accounts.map(a=>'| '+(a.wx_name||a.wx_biz)+' | '+a.baseline_known+' | '+fmt(a.read_mean)+' | '+fmt(a.read_median)+' | '+fmt(a.signal_ratio)+' | '+(a.low_fan_signal?'是':'待核实/未符合')+' | '+a.baseline_start+'—'+a.baseline_end+' | ['+a.sample_title.replace(/\|/g,'／')+']('+a.top_art_url+') |'),'',

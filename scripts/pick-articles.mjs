@@ -5,7 +5,7 @@
 //
 // 规则：时间窗 + 阅读下限 + 赛道词必中 + 去重 + 爆款分排序 + 每号上限 + 低粉爆款优先配额。
 import { join } from 'node:path';
-import { articleKey, articleSignal, readValue } from './reading-stats.mjs';
+import { articleKey, articleSignal, articlePosition, readValue } from './reading-stats.mjs';
 import {
   buildMustRegex,
   clean,
@@ -119,6 +119,8 @@ for (const r of pool.slice().sort((a,b) => scoreOf(b) - scoreOf(a))) {
     单篇爆款倍率: signal.inWindow ? signal.ratio : null,
     低粉爆款信号: signal.low ? '是' : '',
     内容类型: r.content_type || '',
+    推送位置: articlePosition(r),
+    基线位置: acc.baseline_position === 1 ? '首条' : '未核实',
     基线起日: acc.baseline_start || '',
     基线止日: acc.baseline_end || '',
     wx_name: accName,
@@ -166,6 +168,8 @@ const rows = picked.map((it, i) => ({
   账号爆款倍率: it.账号爆款倍率,
   单篇爆款倍率: it.单篇爆款倍率,
   内容类型: it.内容类型,
+  推送位置: it.推送位置,
+  基线位置: it.基线位置,
   基线起日: it.基线起日,
   基线止日: it.基线止日,
   低粉爆款信号: it.低粉爆款信号,
@@ -180,7 +184,7 @@ const rows = picked.map((it, i) => ({
 writeJson(join(outDir, 'articles.json'), rows);
 writeCsv(
   join(outDir, 'articles.csv'),
-  ['序号', '标题', '账号', '阅读量', '点赞', '在看', '转发', '爆款分', '账号爆款倍率', '单篇爆款倍率', '基线起日', '基线止日', '内容类型', '低粉爆款信号', '发布日期', '关键词', '原文链接', '阅读量核实状态'],
+  ['序号', '标题', '账号', '阅读量', '点赞', '在看', '转发', '爆款分', '账号爆款倍率', '单篇爆款倍率', '基线起日', '基线止日', '内容类型', '推送位置', '基线位置', '低粉爆款信号', '发布日期', '关键词', '原文链接', '阅读量核实状态'],
   rows
 );
 

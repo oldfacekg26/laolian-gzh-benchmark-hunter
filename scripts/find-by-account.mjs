@@ -1,4 +1,4 @@
-import { readingStats, readValue, articleSignal, baselineWindow } from './reading-stats.mjs';
+import { readingStats, readValue, articleSignal, baselineWindow, baselineRows } from './reading-stats.mjs';
 // 「扒一个号」：给一个博主，把它的文章清单拉出来，供批量下载。
 //
 // 两条路，免费在默认位，付费按需开：
@@ -475,9 +475,9 @@ const max = stats.max;
 const ratio = median > 0 ? Math.round(max / median * 100) / 100 : null;
 function baselineFor(r) {
   const w = baselineWindow(r.pub_time, 30);
-  const subset = w && r.content_type ? pool.filter(row=>row.content_type===r.content_type && String(row.pub_time).slice(0,10)>=w.start && String(row.pub_time).slice(0,10)<=w.end) : [];
+  const subset = baselineRows(pool, r.content_type, w);
   const s = readingStats(subset);
-  return {baseline_verified:paid && minRead === 0 && !!r.content_type,baseline_content_type:r.content_type,baseline_known:s.known,read_median:s.median,baseline_start:w?.start,baseline_end:w?.end};
+  return {baseline_verified:paid && minRead === 0 && !!r.content_type,baseline_content_type:r.content_type,baseline_position:1,baseline_known:s.known,read_median:s.median,baseline_start:w?.start,baseline_end:w?.end};
 }
 
 const sorted = pool
