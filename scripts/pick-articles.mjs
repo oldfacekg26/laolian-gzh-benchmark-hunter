@@ -77,7 +77,7 @@ let droppedMust = 0;
 let droppedAccount = 0;
 let droppedDup = 0;
 
-for (const r of pool) {
+for (const r of pool.slice().sort((a,b) => scoreOf(b) - scoreOf(a))) {
   const pub = String(r.pub_time || '').slice(0, 10);
   if (pub && pub < since) {
     droppedTime++;

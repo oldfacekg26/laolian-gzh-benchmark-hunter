@@ -37,6 +37,7 @@ test('选文按单篇判断，不继承整号标签，且不限总量仍输出�
   writeFileSync(join(out,'accounts.json'),JSON.stringify([account]));
   writeFileSync(join(out,'config.json'),JSON.stringify({since:'2026-01-01'}));
   writeFileSync(join(out,'pool.json'),JSON.stringify([
+    {wx_biz:'a',sn:'lower-duplicate',title:'有效爆款',read_num:11000,pub_time:'2026-09-20'},
     {wx_biz:'a',sn:'pass',title:'有效爆款',read_num:12000,pub_time:'2026-09-20'},
     {wx_biz:'a',sn:'normal',title:'普通文章',read_num:500,pub_time:'2026-09-20'},
     {wx_biz:'a',sn:'outside',title:'不同月份',read_num:50000,pub_time:'2026-08-20'},
